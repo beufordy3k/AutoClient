@@ -4,7 +4,7 @@
 // </auto-generated>
 //----------------------
 
-namespace VAutoClient
+namespace AutoClient
 {
 #pragma warning disable // Disable all warnings
 

@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace VAutoClient
+namespace AutoClient
 {
     internal class Program
     {
