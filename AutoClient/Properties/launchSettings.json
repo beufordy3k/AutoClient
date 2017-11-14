@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "AutoClient": {
+      "commandName": "Project",
+      "commandLineArgs": "-l Trace"
+    }
+  }
+}

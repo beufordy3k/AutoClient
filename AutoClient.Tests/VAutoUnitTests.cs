@@ -3,10 +3,10 @@ using Xunit;
 
 namespace AutoClient.Tests
 {
-    public class UnitTest1
+    public class VAutoUnitTests
     {
         [Fact]
-        public void Test1()
+        public void Get()
         {
 
         }

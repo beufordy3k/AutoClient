@@ -5,8 +5,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 
-using NLog;
-
+using Microsoft.Extensions.Logging;
 
 namespace AutoClient
 {
@@ -14,7 +13,7 @@ namespace AutoClient
     {
         private const string DefaultEndpointUrl = "http://vautointerview.azurewebsites.net";
 
-        private ILogger Logger { get; }
+        private ILogger<VAutoClient> Logger { get; }
         private HttpClient Client { get; }
 
         private ConcurrentQueue<int> VehicleQueue { get; } = new ConcurrentQueue<int>();
@@ -23,7 +22,7 @@ namespace AutoClient
         private ConcurrentQueue<int> DealerQueue { get; } = new ConcurrentQueue<int>();
         private ConcurrentDictionary<int, DealersResponse> Dealers { get; } = new ConcurrentDictionary<int, DealersResponse>();
 
-        public VAutoClient(ILogger logger, HttpClient client)
+        public VAutoClient(ILogger<VAutoClient> logger, HttpClient client)
         {
             Logger = logger;
             Client = client;
@@ -78,19 +77,18 @@ namespace AutoClient
             {
                 var datasetResponse = await datasetClient.GetDataSetIdAsync();
 
-                if (string.IsNullOrEmpty(datasetResponse.DatasetId))
+                if (!string.IsNullOrEmpty(datasetResponse.DatasetId))
                 {
                     return datasetResponse.DatasetId;
                 }
 
-                Logger.Error($"Error encountered retrieving Dataset Id from endpoint '{endpointUrl}'. No Id returned.");
+                Logger.LogError($"Error encountered retrieving Dataset Id from endpoint '{endpointUrl}'. No Id returned.");
 
                 return null;
             }
             catch (VAutoException vaex)
             {
-                Logger.Error($"Exception encountered retrieving Dataset Id from endpoint '{endpointUrl}'", vaex);
-
+                Logger.LogError($"Exception encountered retrieving Dataset Id from endpoint '{endpointUrl}'", vaex);
             }
 
             return null;
@@ -107,9 +105,9 @@ namespace AutoClient
 
                 if (vehicleIdsResponse.VehicleIds == null || !vehicleIdsResponse.VehicleIds.Any())
                 {
-                    Logger.Error($"Error encountered retrieving Vehicle Id List from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'. No Vehicles returned.");
+                    Logger.LogError($"Error encountered retrieving Vehicle Id List from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'. No Vehicles returned.");
 
-                    return true;
+                    return true; //Error condition exists
                 }
 
                 foreach (var id in vehicleIdsResponse.VehicleIds)
@@ -120,12 +118,12 @@ namespace AutoClient
             }
             catch (VAutoException vaex)
             {
-                Logger.Error($"Exception encountered retrieving Vehicle Id List from endpoint '{endpointUrl}', using dataset Id '{datasetId}'", vaex);
+                Logger.LogError($"Exception encountered retrieving Vehicle Id List from endpoint '{endpointUrl}', using dataset Id '{datasetId}'", vaex);
 
-                return true;
+                return true; //Error condition exists
             }
 
-            return false;
+            return false; //No error condition
         }
 
         /// <summary>
@@ -151,26 +149,26 @@ namespace AutoClient
                 }
                 catch (VAutoException vaex)
                 {
-                    Logger.Error($"Exception encountered retrieving Vehicle Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Vehicle Id '{id}", vaex);
+                    Logger.LogError($"Exception encountered retrieving Vehicle Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Vehicle Id '{id}", vaex);
 
                     continue; //Process next item in queue
                 }
 
                 if (vehicleResponse == null)
                 {
-                    Logger.Error($"Error encountered retrieving Vehicle Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Vehicle Id '{id}'. No Vehicle Detail returned. Continuing.");
+                    Logger.LogError($"Error encountered retrieving Vehicle Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Vehicle Id '{id}'. No Vehicle Detail returned. Continuing.");
 
                     continue;
                 }
 
                 if (Vehicles.ContainsKey(vehicleId) || !Vehicles.TryAdd(vehicleId, vehicleResponse))
                 {
-                    Logger.Warn($"Vehicle Detail from endpoint '{endpointUrl}' already added. Dataset Id '{datasetId}', Vehicle Id '{id}'.");
+                    Logger.LogWarning($"Vehicle Detail from endpoint '{endpointUrl}' already added. Dataset Id '{datasetId}', Vehicle Id '{id}'.");
 
                     continue;
                 }
 
-                Logger.Debug($"Vehicle Detail added for Vehicle Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'.");
+                Logger.LogDebug($"Vehicle Detail added for Vehicle Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'.");
 
                 if (vehicleResponse.DealerId.HasValue)
                 {
@@ -179,7 +177,7 @@ namespace AutoClient
                     continue;
                 }
 
-                Logger.Debug($"Dealer Id not available for Vehicle Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'.");
+                Logger.LogDebug($"Dealer Id not available for Vehicle Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'.");
             }
         }
 
@@ -205,25 +203,25 @@ namespace AutoClient
                 }
                 catch (VAutoException vaex)
                 {
-                    Logger.Error($"Exception encountered retrieving Dealer Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Dealer Id '{id}", vaex);
+                    Logger.LogError($"Exception encountered retrieving Dealer Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Dealer Id '{id}", vaex);
                     throw;
                 }
 
                 if (dealerResponse == null)
                 {
-                    Logger.Error($"Error encountered retrieving Dealer Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Dealer Id '{id}'. No Vehicle Detail returned. Continuing.");
+                    Logger.LogError($"Error encountered retrieving Dealer Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Dealer Id '{id}'. No Vehicle Detail returned. Continuing.");
 
                     continue;
                 }
 
-                if (Vehicles.ContainsKey(dealerId) || !Dealers.TryAdd(dealerId, dealerResponse))
+                if (Dealers.ContainsKey(dealerId) || !Dealers.TryAdd(dealerId, dealerResponse))
                 {
-                    Logger.Debug($"Dealer Detail from endpoint '{endpointUrl}' already added. Dataset Id '{datasetId}', Dealer Id '{id}'.");
+                    Logger.LogDebug($"Dealer Detail from endpoint '{endpointUrl}' already added. Dataset Id '{datasetId}', Dealer Id '{id}'.");
 
                     continue;
                 }
 
-                Logger.Debug($"Dealer Detail added for Dealer Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'");
+                Logger.LogDebug($"Dealer Detail added for Dealer Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'");
             }
         }
 
@@ -236,13 +234,13 @@ namespace AutoClient
 
             var answer = new Answer
             {
-                Dealers = (ObservableCollection<DealerAnswer>) groupedVehicles
+                Dealers = new ObservableCollection<DealerAnswer>(groupedVehicles
                     .Where(gv => gv.Key.HasValue)
                     .Select(gv => new DealerAnswer
                     {
                         DealerId = gv.Key,
                         Name = GetDealerName(gv.Key, dealers),
-                        Vehicles = (ObservableCollection<VehicleAnswer>) gv.Select(v =>
+                        Vehicles = new ObservableCollection<VehicleAnswer>(gv.Select(v =>
                         {
                             var vehicle = v.Value;
 
@@ -253,9 +251,10 @@ namespace AutoClient
                                 Model = vehicle.Model,
                                 Year = vehicle.Year
                             };
-                        })
-                    })
+                        }))
+                    }))
             };
+
             return answer;
         }
 
