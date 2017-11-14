@@ -1,13 +1,12 @@
-﻿using System;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Net.Http;
-using System.Runtime.InteropServices.ComTypes;
 using System.Threading.Tasks;
 
-using Common.Logging;
+using NLog;
+
 
 namespace AutoClient
 {
@@ -15,7 +14,7 @@ namespace AutoClient
     {
         private const string DefaultEndpointUrl = "http://vautointerview.azurewebsites.net";
 
-        private ILog Logger { get; }
+        private ILogger Logger { get; }
         private HttpClient Client { get; }
 
         private ConcurrentQueue<int> VehicleQueue { get; } = new ConcurrentQueue<int>();
@@ -24,12 +23,17 @@ namespace AutoClient
         private ConcurrentQueue<int> DealerQueue { get; } = new ConcurrentQueue<int>();
         private ConcurrentDictionary<int, DealersResponse> Dealers { get; } = new ConcurrentDictionary<int, DealersResponse>();
 
-        public VAutoClient(ILog logger, HttpClient client)
+        public VAutoClient(ILogger logger, HttpClient client)
         {
             Logger = logger;
             Client = client;
         }
-        
+
+        /// <summary>
+        /// Entry point for retrieving auto client data
+        /// </summary>
+        /// <param name="endpointUrl">Used to override the default Endpoint Url</param>
+        /// <returns></returns>
         public async Task<AnswerResponse> Run(string endpointUrl = null)
         {
             endpointUrl = endpointUrl ?? DefaultEndpointUrl;
@@ -38,39 +42,74 @@ namespace AutoClient
             var vehicleClient = new VehiclesClient(Client) {BaseUrl = endpointUrl};
             var dealersClient = new DealersClient(Client) {BaseUrl = endpointUrl};
 
-            string datasetId = null;
+            // 1. Get Dataset
+            var datasetId = await GetDataset(endpointUrl, datasetClient);
 
-            // 1. Get DataSet
+            if (datasetId == null)
+            {
+                return null;
+            }
+
+            // 2. Get Vehicles
+            if (await GetVehicles(endpointUrl, vehicleClient, datasetId)) return null;
+
+            // 3. Get Vehicle Detail
+            await GetVehicleDetail(endpointUrl, vehicleClient, datasetId);
+
+            // 4. Get Dealer Info
+            await GetDealerDetail(endpointUrl, dealersClient, datasetId);
+
+            // 5. Build Answer Response with Vehicles grouped by dealer
+            var answer = BuildAnswer(Vehicles, Dealers);
+
+            // 6. Submit Answer
+            var answerResult = await datasetClient.PostAnswerAsync(datasetId, answer);
+
+            // 7. Return AnswerResponse
+            return answerResult;
+        }
+
+        /// <summary>
+        /// Retrieve the dataset from the endpoint
+        /// </summary>
+        private async Task<string> GetDataset(string endpointUrl, DataSetClient datasetClient)
+        {
             try
             {
                 var datasetResponse = await datasetClient.GetDataSetIdAsync();
 
-                if (!string.IsNullOrEmpty(datasetResponse.DatasetId))
+                if (string.IsNullOrEmpty(datasetResponse.DatasetId))
                 {
-                    Logger.Error(l => l($"Error encountered retrieving Dataset Id from endpoint '{endpointUrl}'. No Id returned."));
-
-                    return null; //No Results
+                    return datasetResponse.DatasetId;
                 }
 
-                datasetId = datasetResponse.DatasetId;
+                Logger.Error($"Error encountered retrieving Dataset Id from endpoint '{endpointUrl}'. No Id returned.");
+
+                return null;
             }
             catch (VAutoException vaex)
             {
-                Logger.Error(l => l($"Exception encountered retrieving Dataset Id from endpoint '{endpointUrl}'"), vaex);
+                Logger.Error($"Exception encountered retrieving Dataset Id from endpoint '{endpointUrl}'", vaex);
 
-                return null; //No Results
             }
 
-            // 2. Get Vehicles
+            return null;
+        }
+
+        /// <summary>
+        /// Get the vehicle Ids using the dataset Id
+        /// </summary>
+        private async Task<bool> GetVehicles(string endpointUrl, VehiclesClient vehicleClient, string datasetId)
+        {
             try
             {
                 var vehicleIdsResponse = await vehicleClient.GetIdsAsync(datasetId);
 
                 if (vehicleIdsResponse.VehicleIds == null || !vehicleIdsResponse.VehicleIds.Any())
                 {
-                    Logger.Error(l => l($"Error encountered retrieving Vehicle Id List from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'. No Vehicles returned."));
+                    Logger.Error($"Error encountered retrieving Vehicle Id List from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'. No Vehicles returned.");
 
-                    return null; //No Results
+                    return true;
                 }
 
                 foreach (var id in vehicleIdsResponse.VehicleIds)
@@ -81,12 +120,19 @@ namespace AutoClient
             }
             catch (VAutoException vaex)
             {
-                Logger.Error(l => l($"Exception encountered retrieving Vehicle Id List from endpoint '{endpointUrl}', using dataset Id '{datasetId}'"), vaex);
+                Logger.Error($"Exception encountered retrieving Vehicle Id List from endpoint '{endpointUrl}', using dataset Id '{datasetId}'", vaex);
 
-                return null;  //No Results
+                return true;
             }
 
-            // 3. Get Vehicle Detail
+            return false;
+        }
+
+        /// <summary>
+        /// Get the vehicle detail for all vehicles
+        /// </summary>
+        private async Task GetVehicleDetail(string endpointUrl, VehiclesClient vehicleClient, string datasetId)
+        {
             while (VehicleQueue.TryDequeue(out var vehicleId))
             {
                 var id = vehicleId;
@@ -105,34 +151,43 @@ namespace AutoClient
                 }
                 catch (VAutoException vaex)
                 {
-                    Logger.Error(l => l($"Exception encountered retrieving Vehicle Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Vehicle Id '{id}"), vaex);
+                    Logger.Error($"Exception encountered retrieving Vehicle Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Vehicle Id '{id}", vaex);
 
                     continue; //Process next item in queue
                 }
 
                 if (vehicleResponse == null)
                 {
-                    Logger.Error(l => l($"Error encountered retrieving Vehicle Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Vehicle Id '{id}'. No Vehicle Detail returned. Continuing."));
+                    Logger.Error($"Error encountered retrieving Vehicle Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Vehicle Id '{id}'. No Vehicle Detail returned. Continuing.");
+
                     continue;
                 }
 
                 if (Vehicles.ContainsKey(vehicleId) || !Vehicles.TryAdd(vehicleId, vehicleResponse))
                 {
-                    Logger.Warn(l => l($"Vehicle Detail from endpoint '{endpointUrl}' already added. Dataset Id '{datasetId}', Vehicle Id '{id}'."));
+                    Logger.Warn($"Vehicle Detail from endpoint '{endpointUrl}' already added. Dataset Id '{datasetId}', Vehicle Id '{id}'.");
 
                     continue;
                 }
 
-                Logger.Debug(l => l($"Vehicle Detail added for Vehicle Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'"));
+                Logger.Debug($"Vehicle Detail added for Vehicle Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'.");
 
                 if (vehicleResponse.DealerId.HasValue)
                 {
                     DealerQueue.Enqueue(vehicleResponse.DealerId.GetValueOrDefault());
+
+                    continue;
                 }
 
+                Logger.Debug($"Dealer Id not available for Vehicle Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'.");
             }
+        }
 
-            // 4. Get Dealer Info
+        /// <summary>
+        /// Get the dealer detail for each unique dealer
+        /// </summary>
+        private async Task GetDealerDetail(string endpointUrl, DealersClient dealersClient, string datasetId)
+        {
             while (DealerQueue.TryDequeue(out var dealerId))
             {
                 var id = dealerId;
@@ -150,29 +205,35 @@ namespace AutoClient
                 }
                 catch (VAutoException vaex)
                 {
-                    Logger.Error(l => l($"Exception encountered retrieving Dealer Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Dealer Id '{id}"), vaex);
+                    Logger.Error($"Exception encountered retrieving Dealer Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Dealer Id '{id}", vaex);
                     throw;
                 }
 
                 if (dealerResponse == null)
                 {
-                    Logger.Error(l => l($"Error encountered retrieving Dealer Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Dealer Id '{id}'. No Vehicle Detail returned. Continuing."));
+                    Logger.Error($"Error encountered retrieving Dealer Detail from endpoint '{endpointUrl}', using Dataset Id '{datasetId}' and Dealer Id '{id}'. No Vehicle Detail returned. Continuing.");
+
                     continue;
                 }
 
                 if (Vehicles.ContainsKey(dealerId) || !Dealers.TryAdd(dealerId, dealerResponse))
                 {
-                    Logger.Debug(l => l($"Dealer Detail from endpoint '{endpointUrl}' already added. Dataset Id '{datasetId}', Dealer Id '{id}'."));
+                    Logger.Debug($"Dealer Detail from endpoint '{endpointUrl}' already added. Dataset Id '{datasetId}', Dealer Id '{id}'.");
 
                     continue;
                 }
 
-                Logger.Debug(l => l($"Dealer Detail added for Dealer Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'"));
+                Logger.Debug($"Dealer Detail added for Dealer Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'");
             }
+        }
 
-            var groupedVehicles = Vehicles.GroupBy(v => v.Value.DealerId); // This is *not* a good idea (memory usage and CPU) for large volume data sets
+        /// <summary>
+        /// Build the return answer
+        /// </summary>
+        internal static Answer BuildAnswer(ConcurrentDictionary<int, VehicleResponse> vehicles, ConcurrentDictionary<int, DealersResponse> dealers)
+        {
+            var groupedVehicles = vehicles.GroupBy(v => v.Value.DealerId); // This is *not* a good idea (memory usage and CPU) for large volume data sets
 
-            // 5. Build Answer Response with Vehicles grouped by dealer
             var answer = new Answer
             {
                 Dealers = (ObservableCollection<DealerAnswer>) groupedVehicles
@@ -180,7 +241,7 @@ namespace AutoClient
                     .Select(gv => new DealerAnswer
                     {
                         DealerId = gv.Key,
-                        Name = GetDealerName(gv.Key, Dealers),
+                        Name = GetDealerName(gv.Key, dealers),
                         Vehicles = (ObservableCollection<VehicleAnswer>) gv.Select(v =>
                         {
                             var vehicle = v.Value;
@@ -190,19 +251,18 @@ namespace AutoClient
                                 VehicleId = vehicle.VehicleId,
                                 Make = vehicle.Make,
                                 Model = vehicle.Model,
-                                Year = vehicle.Year,
+                                Year = vehicle.Year
                             };
                         })
                     })
             };
-
-            // 6. Submit Answer
-            // 7. Return AnswerResponse
-
-            return null;
+            return answer;
         }
 
-        private static string GetDealerName(int? id, IReadOnlyDictionary<int, DealersResponse> dealers)
+        /// <summary>
+        /// Get the dealer name from the dealers dictionary
+        /// </summary>
+        internal static string GetDealerName(int? id, IReadOnlyDictionary<int, DealersResponse> dealers)
         {
             if (!id.HasValue)
             {
