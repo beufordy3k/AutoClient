@@ -28,14 +28,15 @@ namespace AutoClient
 
             fclp.Setup<LogLevel>('l', "logLevel")
                 .Callback(l => logLevel = l)
-                .WithDescription($"[Optional] Used to specify the logging level. Options: {string.Join(", ", Enum.GetNames(typeof(LogLevel)))}. Default: {LogLevel.Information}");
+                .WithDescription(
+                    $"[Optional] Used to specify the logging level. Options: {string.Join(", ", Enum.GetNames(typeof(LogLevel)))}. Default: {LogLevel.Information}");
 
             fclp.SetupHelp("h", "?", "help")
                 .Callback(s => Console.WriteLine(s));
 
             var result = fclp.Parse(args); //Parse command line args
 
-            if (result.HelpCalled) 
+            if (result.HelpCalled)
             {
                 return; //Help displayed nothing left to do
             }
@@ -61,7 +62,7 @@ namespace AutoClient
             Console.WriteLine("");
             Console.WriteLine("AutoClient Results:");
             Console.WriteLine(responseOutput);
-            }
+        }
 
         private static IServiceProvider SetupContainer(LogLevel logLevel)
         {

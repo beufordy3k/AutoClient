@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -53,7 +54,7 @@ namespace AutoClient
             if (await GetVehicles(endpointUrl, vehicleClient, datasetId)) return null;
 
             // 3. Get Vehicle Detail
-            await GetVehicleDetail(endpointUrl, vehicleClient, datasetId);
+            GetVehicleDetail(endpointUrl, vehicleClient, datasetId);
 
             // 4. Get Dealer Info
             await GetDealerDetail(endpointUrl, dealersClient, datasetId);
@@ -129,7 +130,21 @@ namespace AutoClient
         /// <summary>
         /// Get the vehicle detail for all vehicles
         /// </summary>
-        private async Task GetVehicleDetail(string endpointUrl, VehiclesClient vehicleClient, string datasetId)
+        private void GetVehicleDetail(string endpointUrl, VehiclesClient vehicleClient, string datasetId)
+        {
+            var cpuCount = Environment.ProcessorCount;
+
+            var tasks = new Task[cpuCount];
+
+            for (var i=0; i < cpuCount; i++)
+            {
+                tasks[i] = Task.Run(async () => await ProcessVehicleQueue(endpointUrl, vehicleClient, datasetId));
+            }
+
+            Task.WaitAll(tasks);
+        }
+
+        private async Task ProcessVehicleQueue(string endpointUrl, VehiclesClient vehicleClient, string datasetId)
         {
             while (VehicleQueue.TryDequeue(out var vehicleId))
             {
@@ -264,6 +279,11 @@ namespace AutoClient
         internal static string GetDealerName(int? id, IReadOnlyDictionary<int, DealersResponse> dealers)
         {
             if (!id.HasValue)
+            {
+                return null;
+            }
+
+            if (dealers == null)
             {
                 return null;
             }
