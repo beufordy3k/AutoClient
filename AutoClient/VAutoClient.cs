@@ -183,7 +183,7 @@ namespace AutoClient
                     continue;
                 }
 
-                Logger.LogDebug($"Vehicle Detail added for Vehicle Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'.");
+                Logger.LogTrace($"Vehicle Detail added for Vehicle Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'.");
 
                 if (vehicleResponse.DealerId.HasValue)
                 {
@@ -236,7 +236,7 @@ namespace AutoClient
                     continue;
                 }
 
-                Logger.LogDebug($"Dealer Detail added for Dealer Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'");
+                Logger.LogTrace($"Dealer Detail added for Dealer Id '{id}' from endpoint '{endpointUrl}', using Dataset Id '{datasetId}'");
             }
         }
 
