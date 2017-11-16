@@ -134,9 +134,11 @@ namespace AutoClient
         {
             var cpuCount = Environment.ProcessorCount;
 
-            var tasks = new Task[cpuCount];
+            var taskCount = (cpuCount * 2) - 1;
 
-            for (var i=0; i < cpuCount; i++)
+            var tasks = new Task[taskCount];
+
+            for (var i=0; i < taskCount; i++)
             {
                 tasks[i] = Task.Run(async () => await ProcessVehicleQueue(endpointUrl, vehicleClient, datasetId));
             }
